@@ -2,50 +2,85 @@ package emoji
 
 import (
 	"github.com/brahma-adshonor/gohook"
+	"log"
+	"reflect"
 	"syscall"
 )
 
-func emojiHook(fd int, p []byte) (n int, err error) {
-	pPtr := &p
+func doReplaceEmoji[E rune | byte](p []E) []E {
 	pLen := len(p)
-	var waitForWriteBytes []byte
-	var emojiBytes []byte
+	var waitForWriteEs []E
+	var emojiEs []E
 	lock := false
 	for i := 0; i < pLen; i++ {
 		if p[i] != 58 && !lock {
-			waitForWriteBytes = append(waitForWriteBytes, p[i])
+			waitForWriteEs = append(waitForWriteEs, p[i])
 			continue
 		}
 		if p[i] == 58 && !lock {
 			lock = true
-			emojiBytes = append(emojiBytes, p[i])
+			emojiEs = append(emojiEs, p[i])
 			continue
 		}
 		if p[i] == 58 && lock {
-			if len(emojiBytes) == 1 {
-				waitForWriteBytes = append(waitForWriteBytes, emojiBytes...)
+			if len(emojiEs) == 1 {
+				waitForWriteEs = append(waitForWriteEs, emojiEs...)
 				continue
 			}
 			lock = false
-			emojiBytes = append(emojiBytes, p[i])
-			emojiStr := emojiMap[string(emojiBytes)]
+			emojiEs = append(emojiEs, p[i])
+			emojiStr := emojiMap[esToString(emojiEs)]
 			if emojiStr != "" {
-				waitForWriteBytes = append(waitForWriteBytes, []byte(emojiStr)...)
+				waitForWriteEs = append(waitForWriteEs, stringToEs(emojiStr, emojiEs[0])...)
 			} else {
-				waitForWriteBytes = append(waitForWriteBytes, emojiBytes...)
+				waitForWriteEs = append(waitForWriteEs, emojiEs...)
 			}
-			emojiBytes = []byte{}
+			emojiEs = []E{}
 			continue
 		}
-		emojiBytes = append(emojiBytes, p[i])
+		emojiEs = append(emojiEs, p[i])
 		if p[i] == 32 {
 			lock = false
-			waitForWriteBytes = append(waitForWriteBytes, emojiBytes...)
-			emojiBytes = []byte{}
+			waitForWriteEs = append(waitForWriteEs, emojiEs...)
+			emojiEs = []E{}
 		}
 	}
-	*pPtr = waitForWriteBytes
-	wLen := len(waitForWriteBytes)
+	return waitForWriteEs
+}
+
+func esToString[E byte | rune](data []E) string {
+	s := ""
+	for _, d := range data {
+		s += string(d)
+	}
+	return s
+}
+
+func stringToEs[E byte | rune](data string, typeFlag E) []E {
+	e := make([]E, 0)
+	switch reflect.TypeOf(typeFlag).Kind() {
+	case reflect.Uint8:
+		dE := ([]byte)(data)
+		for _, d := range dE {
+			e = append(e, (E)(d))
+		}
+		return e
+	case reflect.Uint32:
+		dE := ([]rune)(data)
+		for _, d := range dE {
+			e = append(e, (E)(d))
+		}
+		return e
+	}
+	return nil
+}
+
+func emojiHook(fd int, p []byte) (n int, err error) {
+	pPtr := &p
+	pLen := len(p)
+	chunk := doReplaceEmoji(p)
+	*pPtr = chunk
+	wLen := len(chunk)
 	w, err := emojiHookTramp(fd, p)
 	if w == wLen {
 		return pLen, err
@@ -59,9 +94,15 @@ func emojiHookTramp(fd int, p []byte) (n int, err error) {
 }
 
 func Activity() {
-	gohook.Hook(syscall.Write, emojiHook, emojiHookTramp)
+	err := gohook.Hook(syscall.Write, emojiHook, emojiHookTramp)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
 
 func InActivity() {
-	gohook.UnHook(syscall.Write)
+	err := gohook.UnHook(syscall.Write)
+	if err != nil {
+		log.Fatal(err)
+	}
 }
