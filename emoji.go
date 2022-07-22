@@ -5,6 +5,8 @@ import (
 	"log"
 	"reflect"
 	"syscall"
+	"unicode/utf16"
+	"unsafe"
 )
 
 func doReplaceEmoji[E rune | byte](p []E) []E {
@@ -75,33 +77,39 @@ func stringToEs[E byte | rune](data string, typeFlag E) []E {
 	return nil
 }
 
-func emojiHook(fd int, p []byte) (n int, err error) {
-	pPtr := &p
-	pLen := len(p)
-	chunk := doReplaceEmoji(p)
-	*pPtr = chunk
-	wLen := len(chunk)
-	w, err := emojiHookTramp(fd, p)
-	if w == wLen {
-		return pLen, err
+func emojiHookWindows(console syscall.Handle, buf *uint16, towrite uint32, written *uint32, reserved *byte) (err error) {
+	bufSlice := make([]uint16, 0)
+	//ptr := *buf
+	for i := 0; i < int(towrite); i++ {
+		c := unsafe.Pointer(uintptr(unsafe.Pointer(buf)) + uintptr(i)*unsafe.Sizeof(*buf))
+		bufSlice = append(bufSlice, *(*uint16)(c))
+	}
+	chunk := utf16.Decode(bufSlice)
+	p := utf16.Encode(doReplaceEmoji(chunk))
+	bufPtr := &buf
+	*bufPtr = &p[0]
+	err = emojiHookWindowsTramp(console, buf, uint32(len(p)), written, reserved)
+	if err != nil {
+		return err
 	} else {
-		return w, err
+		*written = uint32(len(bufSlice))
+		return nil
 	}
 }
 
-func emojiHookTramp(fd int, p []byte) (n int, err error) {
-	return 0, nil
+func emojiHookWindowsTramp(console syscall.Handle, buf *uint16, towrite uint32, written *uint32, reserved *byte) (err error) {
+	return
 }
 
 func Activity() {
-	err := gohook.Hook(syscall.Write, emojiHook, emojiHookTramp)
+	err := gohook.Hook(syscall.WriteConsole, emojiHookWindows, emojiHookWindowsTramp)
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
 func InActivity() {
-	err := gohook.UnHook(syscall.Write)
+	err := gohook.UnHook(syscall.WriteConsole)
 	if err != nil {
 		log.Fatal(err)
 	}
